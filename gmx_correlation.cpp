@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "correlation_core.h"
+#include "gcmi.h"
+#include "transfer_entropy.h"
 
 /*! \file
  * \brief GROMACS 2025 trajectory-analysis front end for gmx_correlation.
@@ -54,6 +56,10 @@ private:
     bool        inBits_  = false;
     bool        useGpu_   = false;
     int         nthreads_ = 0;
+    bool        useGcmi_  = false;
+    bool        useTe_    = false;
+    int         teLag_    = 1;
+    std::string fnTe_;
     Selection   sel_;
     /* Frame collection is intentionally done in C++ containers. The conversion
      * to `t_traj` happens only once in finishAnalysis(), where the legacy math
@@ -105,6 +111,15 @@ void Correlation::initOptions(IOptionsContainer* options, TrajectoryAnalysisSett
     options->addOption(BooleanOption("mi").store(&inBits_).description("Output mutual information instead of coefficient"));
     options->addOption(BooleanOption("gpu").store(&useGpu_).description("Use GPU (CUDA) for Kraskov MI; falls back to CPU if unavailable"));
     options->addOption(IntegerOption("nt").store(&nthreads_).description("Number of CPU threads for Kraskov (0 = all available)"));
+    options->addOption(BooleanOption("gcmi").store(&useGcmi_).description("Gaussian Copula MI estimator (faster than KSG, nonlinear marginals)"));
+    options->addOption(BooleanOption("te").store(&useTe_).description("Compute transfer entropy matrix (asymmetric, directed)"));
+    options->addOption(IntegerOption("lag").store(&teLag_).description("Frame lag for transfer entropy (default 1)"));
+    options->addOption(FileNameOption("ote")
+                               .filetype(OptionFileType::GenericData)
+                               .outputFile()
+                               .store(&fnTe_)
+                               .defaultBasename("transfer_entropy")
+                               .description("Transfer entropy output matrix"));
     options->addOption(FileNameOption("dump")
                                .filetype(OptionFileType::GenericData)
                                .outputFile()
@@ -231,7 +246,22 @@ void Correlation::writeOutput()
 
     using Clock = std::chrono::steady_clock;
 
-    if (linear_)
+    if (useGcmi_)
+    {
+        if (useGpu_ && !gcmi_gpu_available()) {
+            fprintf(stderr, "Note: --gpu requested but no GPU available for GCMI — running on CPU.\n");
+            useGpu_ = false;
+        }
+        const char* backend = useGpu_ ? "GPU" : "CPU";
+        fprintf(stderr, "\nComputing GCMI correlation matrix "
+                "(%d atoms, %d frames) on %s...\n", natoms, nframes, backend);
+        const auto t0 = Clock::now();
+        gcmi_corrmatrix(&traj_, result.data(), useGpu_, nthreads_);
+        const double elapsed =
+            std::chrono::duration<double>(Clock::now() - t0).count();
+        fprintf(stderr, "GCMI matrix done in %.2f s\n", elapsed);
+    }
+    else if (linear_)
     {
         fprintf(stderr, "\nComputing Gaussian correlation matrix "
                 "(%d atoms, %d frames)...\n", natoms, nframes);
@@ -261,6 +291,30 @@ void Correlation::writeOutput()
     if (!inBits_)
     {
         pearsify(result.data(), natoms, DIM);
+    }
+
+    if (useTe_)
+    {
+        std::vector<double> te_mat((size_t)natoms * natoms, 0.0);
+        const char* te_backend = (useGpu_ && te_gpu_available()) ? "GPU" : "CPU";
+        fprintf(stderr, "\nComputing transfer entropy matrix "
+                "(%d atoms, %d frames, k=%d, lag=%d) on %s...\n",
+                natoms, nframes, k_, teLag_, te_backend);
+        const auto t0 = Clock::now();
+        te_matrix(&traj_, te_mat.data(), k_, teLag_, useGpu_, nthreads_);
+        const double elapsed =
+            std::chrono::duration<double>(Clock::now() - t0).count();
+        fprintf(stderr, "Transfer entropy matrix done in %.2f s\n", elapsed);
+
+        if (!fnTe_.empty())
+        {
+            fprintf(stderr, "Writing TE matrix to %s\n", fnTe_.c_str());
+            write_matrix(te_mat.data(), natoms, fnTe_.c_str());
+        }
+        else
+        {
+            fprintf(stderr, "Note: use -ote <file> to save the transfer entropy matrix.\n");
+        }
     }
 
     fprintf(stderr, "Writing output to %s\n", fnMatrix_.c_str());

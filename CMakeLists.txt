@@ -84,14 +84,16 @@ endif()
 set(GMX_CORRELATION_SOURCES
     gmx_correlation.cpp
     correlation_core.cpp
-    kraskov.cpp)
+    kraskov.cpp
+    gcmi.cpp
+    transfer_entropy.cpp)
 
 if(GMX_CORRELATION_CUDA)
     list(APPEND GMX_CORRELATION_SOURCES kraskov_gpu.cu)
 endif()
 if(GMX_CORRELATION_METAL)
-    list(APPEND GMX_CORRELATION_SOURCES kraskov_metal.mm)
-    set_source_files_properties(kraskov_metal.mm PROPERTIES
+    list(APPEND GMX_CORRELATION_SOURCES kraskov_metal.mm gcmi_metal.mm te_metal.mm)
+    set_source_files_properties(kraskov_metal.mm gcmi_metal.mm te_metal.mm PROPERTIES
         COMPILE_FLAGS "-fobjc-arc")
 endif()
 
