@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -45,11 +46,14 @@ public:
 private:
     std::string fnMatrix_;
     std::string fnXpm_;
+    std::string fnDump_;
     int         skip_    = 1;
     int         k_       = 100;
     bool        fit_     = false;
     bool        linear_  = false;
     bool        inBits_  = false;
+    bool        useGpu_   = false;
+    int         nthreads_ = 0;
     Selection   sel_;
     /* Frame collection is intentionally done in C++ containers. The conversion
      * to `t_traj` happens only once in finishAnalysis(), where the legacy math
@@ -99,6 +103,14 @@ void Correlation::initOptions(IOptionsContainer* options, TrajectoryAnalysisSett
     options->addOption(BooleanOption("fit").store(&fit_).description("Compatibility option; pre-fit trajectory instead"));
     options->addOption(BooleanOption("linear").store(&linear_).description("Compute Gaussian linearized mutual information"));
     options->addOption(BooleanOption("mi").store(&inBits_).description("Output mutual information instead of coefficient"));
+    options->addOption(BooleanOption("gpu").store(&useGpu_).description("Use GPU (CUDA) for Kraskov MI; falls back to CPU if unavailable"));
+    options->addOption(IntegerOption("nt").store(&nthreads_).description("Number of CPU threads for Kraskov (0 = all available)"));
+    options->addOption(FileNameOption("dump")
+                               .filetype(OptionFileType::GenericData)
+                               .outputFile()
+                               .store(&fnDump_)
+                               .defaultBasename("traj_dump")
+                               .description("Dump mean-centered trajectory for comparison with legacy tool"));
 }
 
 void Correlation::initAnalysis(const TrajectoryAnalysisSettings& /*settings*/, const TopologyInformation& /*top*/)
@@ -188,20 +200,62 @@ void Correlation::finishAnalysis(int /*nframes*/)
             }
         }
     }
+
+    if (!fnDump_.empty())
+    {
+        FILE* dp = std::fopen(fnDump_.c_str(), "w");
+        if (!dp)
+        {
+            GMX_THROW(FileIOError("Cannot open dump file: " + fnDump_));
+        }
+        std::fprintf(dp, "%d %d\n", traj_.natoms, traj_.nframes);
+        for (int frame = 0; frame < traj_.nframes; ++frame)
+        {
+            for (int atom = 0; atom < traj_.natoms; ++atom)
+            {
+                std::fprintf(dp, "%.10g %.10g %.10g\n",
+                             traj_.x[atom][frame][XX],
+                             traj_.x[atom][frame][YY],
+                             traj_.x[atom][frame][ZZ]);
+            }
+        }
+        std::fclose(dp);
+    }
 }
 
 void Correlation::writeOutput()
 {
-    const int natoms = traj_.natoms;
+    const int natoms  = traj_.natoms;
+    const int nframes = traj_.nframes;
     std::vector<double> result(natoms * natoms, 1.0);
+
+    using Clock = std::chrono::steady_clock;
 
     if (linear_)
     {
+        fprintf(stderr, "\nComputing Gaussian correlation matrix "
+                "(%d atoms, %d frames)...\n", natoms, nframes);
+        const auto t0 = Clock::now();
         gauss_corrmatrix(&traj_, result.data());
+        const double elapsed =
+            std::chrono::duration<double>(Clock::now() - t0).count();
+        fprintf(stderr, "Gaussian matrix done in %.2f s\n", elapsed);
     }
     else
     {
-        kraskov_corrmatrix(&traj_, result.data(), k_);
+        if (useGpu_ && !gpu_available()) {
+            fprintf(stderr, "Note: --gpu requested but no GPU available — running on CPU.\n");
+            useGpu_ = false;
+        }
+        const char* backend = useGpu_ ? "GPU" : "CPU";
+        fprintf(stderr, "\nComputing Kraskov correlation matrix "
+                "(%d atoms, %d frames, k=%d) on %s...\n",
+                natoms, nframes, k_, backend);
+        const auto t0 = Clock::now();
+        kraskov_corrmatrix(&traj_, result.data(), k_, useGpu_, nthreads_);
+        const double elapsed =
+            std::chrono::duration<double>(Clock::now() - t0).count();
+        fprintf(stderr, "Kraskov matrix done in %.2f s\n", elapsed);
     }
 
     if (!inBits_)
@@ -209,12 +263,14 @@ void Correlation::writeOutput()
         pearsify(result.data(), natoms, DIM);
     }
 
+    fprintf(stderr, "Writing output to %s\n", fnMatrix_.c_str());
     write_matrix(result.data(), natoms, fnMatrix_.c_str());
     if (!fnXpm_.empty())
     {
         const std::string title  = selectionName_ + " correlation matrix";
         const char*       legend = inBits_ ? "MI (bits)" : "r(MI)";
         write_xpm_matrix(result.data(), natoms, fnXpm_.c_str(), title.c_str(), legend);
+        fprintf(stderr, "Writing XPM to %s\n", fnXpm_.c_str());
     }
 
     done_traj(&traj_);

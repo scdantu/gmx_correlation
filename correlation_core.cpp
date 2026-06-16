@@ -21,6 +21,18 @@
 #include <mpi.h>
 #endif
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#ifdef GMX_CORRELATION_USE_CUDA
+#include "kraskov_gpu.h"
+#endif
+
+#ifdef GMX_CORRELATION_USE_METAL
+#include "kraskov_metal.h"
+#endif
+
 namespace
 {
 
@@ -298,7 +310,18 @@ void gauss_corrmatrix(const t_traj* traj, double* mat)
     }
 }
 
-void kraskov_corrmatrix(const t_traj* traj, double* mat, int k)
+bool gpu_available()
+{
+#ifdef GMX_CORRELATION_USE_CUDA
+    return kraskov_gpu_probe();
+#elif defined(GMX_CORRELATION_USE_METAL)
+    return kraskov_metal_probe();
+#else
+    return false;
+#endif
+}
+
+void kraskov_corrmatrix(const t_traj* traj, double* mat, int k, bool use_gpu, int nthreads)
 {
     const int natoms = traj->natoms;
     std::fill(mat, mat + natoms * natoms, 0.0);
@@ -307,24 +330,106 @@ void kraskov_corrmatrix(const t_traj* traj, double* mat, int k)
     t_kraskov kraskov;
     kraskov_prepare(&mutableTraj, &kraskov);
 
+#if defined(GMX_CORRELATION_USE_CUDA)
+    if (use_gpu) {
+        if (k > 128) {
+            fprintf(stderr, "Note: GPU path supports k ≤ 128; k=%d requested — falling back to CPU.\n", k);
+        } else if (!kraskov_gpu_probe()) {
+            fprintf(stderr, "Note: no CUDA device found — falling back to CPU.\n");
+        } else {
+            kraskov_corrmatrix_gpu(&kraskov, natoms, mat, k);
+            kraskov_done(&kraskov);
+            return;
+        }
+    }
+#elif defined(GMX_CORRELATION_USE_METAL)
+    if (use_gpu) {
+        if (k > 128) {
+            fprintf(stderr, "Note: Metal GPU path supports k ≤ 128; k=%d requested — falling back to CPU.\n", k);
+        } else if (!kraskov_metal_probe()) {
+            fprintf(stderr, "Note: no Metal device found — falling back to CPU.\n");
+        } else {
+            kraskov_corrmatrix_metal(&kraskov, natoms, mat, k);
+            kraskov_done(&kraskov);
+            return;
+        }
+    }
+#else
+    if (use_gpu) {
+        fprintf(stderr, "Note: binary was built without GPU support (rebuild with -DGMX_CORRELATION_METAL=ON on macOS or -DGMX_CORRELATION_CUDA=ON on Linux).\n");
+    }
+#endif
+
     const int rank = mpiRank();
     const int size = mpiSize();
-    int task = 0;
-    /* Static round-robin assignment is sufficient because each matrix element
-     * is independent and the old tool's main scaling benefit came from that
-     * embarrassingly parallel structure. */
-    for (int a1 = 0; a1 < natoms; ++a1)
+
+    /* ---- Thread count ---- */
+#ifdef _OPENMP
+    if (nthreads > 0)
+        omp_set_num_threads(nthreads);
+    const int actual_threads = omp_get_max_threads();
+#else
+    const int actual_threads = 1;
+    (void)nthreads;
+#endif
+    if (rank == 0)
+        fprintf(stderr, "  CPU threads: %d\n", actual_threads);
+
+    /* ---- Diagonal ---- */
+    for (int i = 0; i < natoms; ++i)
+        mat[i * natoms + i] = 2000.0;
+
+    /* ---- Off-diagonal pairs: embarrassingly parallel ---- *
+     * Each unique pair (a1 > a2) maps to a flat index:      *
+     *   pair_id = a1*(a1-1)/2 + a2                          *
+     * MPI rank r owns pairs where pair_id % size == rank.   *
+     * OpenMP threads share the pairs owned by this rank.    */
+    const int npairs  = natoms * (natoms - 1) / 2;
+    int completed     = 0;   /* protected by omp critical(prog) */
+    int last_pct      = -1;
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int a1 = 1; a1 < natoms; ++a1)
     {
-        for (int a2 = 0; a2 <= a1; ++a2, ++task)
+        for (int a2 = 0; a2 < a1; ++a2)
         {
-            if (task % size != rank)
+            const int pair_id = a1 * (a1 - 1) / 2 + a2;
+            if (pair_id % size != rank)
             {
+                /* Count skipped pairs so progress reaches 100 % */
+#pragma omp critical(prog)
+                {
+                    if (++completed * 100 / npairs > last_pct && rank == 0)
+                    {
+                        last_pct = completed * 100 / npairs;
+                        fprintf(stderr, "\r  Progress: %3d%%", last_pct);
+                        fflush(stderr);
+                    }
+                }
                 continue;
             }
-            const double value = (a1 == a2) ? 2000.0 : kraskov_wrap(&kraskov, a1, a2, k);
+
+            const double value = kraskov_wrap(&kraskov, a1, a2, k);
             mat[a1 * natoms + a2] = value;
             mat[a2 * natoms + a1] = value;
+
+#pragma omp critical(prog)
+            {
+                const int pct = ++completed * 100 / npairs;
+                if (pct > last_pct && rank == 0)
+                {
+                    last_pct = pct;
+                    fprintf(stderr, "\r  Progress: %3d%%", pct);
+                    fflush(stderr);
+                }
+            }
         }
+    }
+
+    if (rank == 0)
+    {
+        fprintf(stderr, "\r  Progress: 100%%\n");
+        fflush(stderr);
     }
 
     kraskov_done(&kraskov);

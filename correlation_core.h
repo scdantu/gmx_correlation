@@ -75,8 +75,11 @@ void write_xpm_matrix(const double* mat, int natoms, const char* outfile, const 
 //! Compute the Gaussian/linearized mutual-information approximation.
 void gauss_corrmatrix(const t_traj* traj, double* mat);
 
-//! Compute the Kraskov mutual-information matrix, optionally distributed by MPI.
-void kraskov_corrmatrix(const t_traj* traj, double* mat, int k);
+//! Compute the Kraskov mutual-information matrix, optionally on GPU or via MPI.
+void kraskov_corrmatrix(const t_traj* traj, double* mat, int k, bool use_gpu = false, int nthreads = 0);
+
+//! Return true if a CUDA-capable GPU is available (always false without CUDA build).
+bool gpu_available();
 
 //! Convert mutual information to generalized correlation coefficients.
 void pearsify(double* mat, int n, int dim);
