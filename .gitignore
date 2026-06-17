@@ -8,3 +8,13 @@ Makefile
 *.dylib
 *.so
 *.a
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Editor
+.DS_Store
