@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * kraskov_metal.mm — Metal (macOS GPU) implementation of the KSG estimator.
  *

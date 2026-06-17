@@ -324,6 +324,10 @@ bool gpu_available()
 void kraskov_corrmatrix(const t_traj* traj, double* mat, int k, bool use_gpu, int nthreads)
 {
     const int natoms = traj->natoms;
+    if (natoms < 2)
+        throw std::runtime_error("kraskov_corrmatrix: need at least 2 atoms");
+    if (traj->nframes <= k)
+        throw std::runtime_error("kraskov_corrmatrix: nframes must exceed k (number of nearest neighbours)");
     std::fill(mat, mat + natoms * natoms, 0.0);
 
     t_traj mutableTraj = *traj;
@@ -383,7 +387,15 @@ void kraskov_corrmatrix(const t_traj* traj, double* mat, int k, bool use_gpu, in
      * Each unique pair (a1 > a2) maps to a flat index:      *
      *   pair_id = a1*(a1-1)/2 + a2                          *
      * MPI rank r owns pairs where pair_id % size == rank.   *
-     * OpenMP threads share the pairs owned by this rank.    */
+     * OpenMP threads share the pairs owned by this rank.    *
+     *                                                        *
+     * Thread-safety of kraskov_wrap(&kraskov, a1, a2, k):   *
+     *   kraskov_wrap() deep-copies kr->x[row] into private  *
+     *   local arrays before passing them to mir_xnyn(), so   *
+     *   mir_xnyn() never writes through the shared kr->x    *
+     *   pointer. kr->psi and kr->scal are read-only lookup  *
+     *   tables after kraskov_prepare() returns. No writes to *
+     *   shared state occur during the parallel loop.         */
     const int npairs  = natoms * (natoms - 1) / 2;
     int completed     = 0;   /* protected by omp critical(prog) */
     int last_pct      = -1;

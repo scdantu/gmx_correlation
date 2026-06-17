@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.2.0] — 2026-06-17
+
+### Fixed
+- **GCMI tie handling**: `copula_transform()` now uses midrank averaging for
+  tied values instead of leaving them in arbitrary `std::sort` order.
+- **Default network threshold**: `--threshold` now defaults to
+  `mean + 0.5·std` of positive off-diagonal values instead of `0.0`, which
+  previously produced near-complete graphs for typical r(MI) matrices.
+- **PyMOL CGO scalability**: `write_pml()` now emits a single compact
+  `_EDGES` list instead of one Python block per edge; O(1) file size.
+- **Bounds checks**: `kraskov_corrmatrix` and `gcmi_corrmatrix` now throw
+  `std::runtime_error` for `natoms < 2`, `nframes ≤ k`, or `nframes < 6`.
+
+### Added
+- **Test suite** (`tests/`): 29 pytest tests — matrix I/O round-trip, GCMI
+  vs. analytical Gaussian MI, KSG-1 reference vs. analytic, TE/CMI
+  Frenzel-Pompe vs. coupled AR(1) analytical values.
+- **GitHub Actions CI** (`.github/workflows/tests.yml`): Python 3.10 + 3.12.
+- **Thread-safety audit**: verified `t_kraskov*` is read-only during the
+  OpenMP parallel loop; documented in `correlation_core.cpp`.
+- **`pearsify` warning for GCMI**: stderr note when the Lange-Grubmüller
+  r(MI) transform is applied to GCMI output (not independently validated).
+- `scipy>=1.10` and `pytest>=7.0` added to `requirements.txt`.
+
+---
+
 ## [1.1.0] — 2026-06-16
 
 ### Added

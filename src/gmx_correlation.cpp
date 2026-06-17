@@ -1,9 +1,14 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
 #include <string>
 #include <vector>
+
+#ifndef GMX_CORRELATION_VERSION
+#define GMX_CORRELATION_VERSION "unknown"
+#endif
 
 #include "correlation_core.h"
 #include "gcmi.h"
@@ -80,6 +85,7 @@ void Correlation::initOptions(IOptionsContainer* options, TrajectoryAnalysisSett
         "For fitted analysis, pre-fit the trajectory with [TT]gmx trjconv -fit[tt] before running this tool."
     };
 
+    fprintf(stderr, "gmx_correlation version %s\n", GMX_CORRELATION_VERSION);
     settings->setHelpText(desc);
     /* Requiring topology keeps selection behavior close to the legacy tool,
      * where users chose analysis groups from topology/index information. */
@@ -290,6 +296,24 @@ void Correlation::writeOutput()
 
     if (!inBits_)
     {
+        /* pearsify() applies the Lange-Grubmüller (2006) r(MI) formula:
+         *   r = sqrt(1 - exp(-2/d * MI))
+         * This was derived and validated for KSG mutual information estimates.
+         * When -gcmi is used, the MI values come from the Gaussian Copula
+         * estimator (Ince et al. 2017) which operates in a different
+         * parameterisation.  The r(MI) transform is applied here for
+         * consistency with the KSG output format, but the resulting values
+         * have NOT been independently validated against a reference r(MI)
+         * for GCMI.  Use -mi to write raw MI in nats and avoid this
+         * conversion, or compare GCMI r(MI) against KSG r(MI) to assess
+         * agreement before publication. */
+        if (useGcmi_)
+        {
+            fprintf(stderr,
+                "NOTE: Applying Lange-Grubmuller r(MI) conversion to GCMI output.\n"
+                "      This transform was validated for KSG MI, not GCMI.\n"
+                "      Use -mi to write raw MI (nats) if in doubt.\n");
+        }
         pearsify(result.data(), natoms, DIM);
     }
 

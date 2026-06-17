@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * gcmi.cpp — Gaussian Copula Mutual Information estimator.
  *
@@ -114,13 +115,31 @@ static void copula_transform(const t_traj* traj, std::vector<double>& z)
                 return traj->x[atom][a][dim] < traj->x[atom][b][dim];
             });
 
-            /* Assign van der Waerden scores */
-            for (int r = 0; r < N; ++r)
+            /* Assign van der Waerden scores with midrank tie handling.
+             * Tied frames receive the average probit of their shared rank
+             * range so that the copula transform is well-defined regardless
+             * of the order std::sort leaves equal elements in. */
+            int r = 0;
+            while (r < N)
             {
-                /* Midpoint rank: (r + 0.5) / N in (0,1) */
-                const double p = (r + 0.5) / N;
-                /* erfinv is a POSIX/glibc extension: probit = sqrt(2)*erfinv(2p-1) */
-                z[(size_t)comp * N + idx[r]] = std::sqrt(2.0) * gcmi_erfinv(2.0 * p - 1.0);
+                /* Find the end of the run of equal values starting at r */
+                int s = r + 1;
+                while (s < N && traj->x[atom][idx[s]][dim] == traj->x[atom][idx[r]][dim])
+                    ++s;
+
+                /* Average the probit scores for ranks r, r+1, …, s-1 */
+                double avg_z = 0.0;
+                for (int t = r; t < s; ++t)
+                {
+                    const double p = (t + 0.5) / N;
+                    avg_z += std::sqrt(2.0) * gcmi_erfinv(2.0 * p - 1.0);
+                }
+                avg_z /= (s - r);
+
+                for (int t = r; t < s; ++t)
+                    z[(size_t)comp * N + idx[t]] = avg_z;
+
+                r = s;
             }
         }
     }
@@ -228,6 +247,11 @@ void gcmi_corrmatrix(const t_traj* traj, double* mat, bool use_gpu, int nthreads
 {
     const int natoms = traj->natoms;
     const int N      = traj->nframes;
+
+    if (natoms < 2)
+        throw std::runtime_error("gcmi_corrmatrix: need at least 2 atoms");
+    if (N < 6)
+        throw std::runtime_error("gcmi_corrmatrix: need at least 6 frames for a non-singular 6x6 covariance");
 
     std::fill(mat, mat + (size_t)natoms * natoms, 0.0);
 

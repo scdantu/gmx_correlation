@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 cmake_policy(VERSION 3.28)
 
-project(gmx_correlation CXX)
+project(gmx_correlation VERSION 1.2.0 LANGUAGES CXX)
 
 # ── Build type ────────────────────────────────────────────────────────────────
 if(NOT CMAKE_BUILD_TYPE)
@@ -159,6 +159,10 @@ if(GMX_CORRELATION_MPI)
     target_link_libraries(gmx_correlation PRIVATE MPI::MPI_CXX)
     message(STATUS "MPI: enabled")
 endif()
+
+# ── Version string ────────────────────────────────────────────────────────────
+target_compile_definitions(gmx_correlation PRIVATE
+    GMX_CORRELATION_VERSION="${PROJECT_VERSION}")
 
 # ── Install targets ───────────────────────────────────────────────────────────
 install(TARGETS gmx_correlation RUNTIME DESTINATION bin)

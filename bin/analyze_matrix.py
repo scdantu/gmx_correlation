@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 analyze_matrix.py — Post-processing for gmx_correlation output matrices.
 
@@ -168,6 +169,26 @@ def plot_heatmap(mat: np.ndarray,
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2. NETWORK ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def auto_threshold(mat: np.ndarray, asymmetric: bool = False) -> float:
+    """Return mean + 0.5*std of off-diagonal values as a sensible default threshold.
+
+    For r(MI) matrices nearly all off-diagonal values are positive, so
+    threshold=0 creates a near-complete graph.  This heuristic keeps roughly
+    the top ~30% of edges depending on the distribution.
+    """
+    n = mat.shape[0]
+    if asymmetric:
+        mask = ~np.eye(n, dtype=bool)
+    else:
+        # Upper triangle only for symmetric matrices
+        mask = np.triu(np.ones((n, n), dtype=bool), k=1)
+    vals = mat[mask]
+    vals = vals[vals > 0]
+    if len(vals) == 0:
+        return 0.0
+    return float(np.mean(vals) + 0.5 * np.std(vals))
+
 
 def build_graph(mat: np.ndarray,
                 threshold: float = 0.0,
@@ -478,41 +499,47 @@ def write_pml(g: "ig.Graph",
     pml("")
 
     # ── Network edges as CGO cylinders ────────────────────────────────────────
+    # Build the edge list in Python (not per-edge PyMOL commands) so that the
+    # embedded script is O(1) lines regardless of network size.
     pml("# ── Network edges (top-weighted pairs as CGO cylinders) ─────────────")
-    pml("python")
-    pml("from pymol import cmd")
-    pml("from chempy.cgo import CYLINDER, BEGIN, LINES, VERTEX, END, COLOR")
-    pml("")
-    pml("def draw_edges():")
-    pml("    obj = []")
 
+    # Collect edge data as a compact list of tuples written once into the .pml
+    edge_tuples = []
+    wmax = all_weights.max() if len(all_weights) > 0 else 1.0
     for e in ug.es:
         if e["weight"] < edge_wt_cutoff:
             continue
         src = int(ug.vs[e.source]["name"])
         tgt = int(ug.vs[e.target]["name"])
-        src_cid = membership[e.source]
-        tgt_cid = membership[e.target]
-        r1, g1, b1 = _comm_colour(src_cid)
-        r2, g2, b2 = _comm_colour(tgt_cid)
-        # Normalised weight → cylinder radius 0.05 – 0.20
+        r1, g1, b1 = _comm_colour(membership[e.source])
+        r2, g2, b2 = _comm_colour(membership[e.target])
         w = float(e["weight"])
-        w_norm = (w - edge_wt_cutoff) / max(all_weights.max() - edge_wt_cutoff, 1e-9)
+        w_norm = (w - edge_wt_cutoff) / max(wmax - edge_wt_cutoff, 1e-9)
         radius = 0.05 + 0.15 * w_norm
+        edge_tuples.append((src, tgt, radius, r1, g1, b1, r2, g2, b2))
 
-        pml(f"    # edge {src}-{tgt}  w={w:.3f}")
-        pml(f"    pos1 = cmd.get_atom_coords('protein and chain {chain} and resi {src} and name CA')")
-        pml(f"    pos2 = cmd.get_atom_coords('protein and chain {chain} and resi {tgt} and name CA')")
-        pml(f"    if pos1 and pos2:")
-        pml(f"        obj += [CYLINDER,")
-        pml(f"                pos1[0], pos1[1], pos1[2],")
-        pml(f"                pos2[0], pos2[1], pos2[2],")
-        pml(f"                {radius:.3f},")
-        pml(f"                {r1:.3f}, {g1:.3f}, {b1:.3f},")
-        pml(f"                {r2:.3f}, {g2:.3f}, {b2:.3f}]")
-
+    pml("python")
+    pml("from pymol import cmd")
+    pml("from chempy.cgo import CYLINDER")
     pml("")
-    pml("    cmd.load_cgo(obj, 'network_edges')")
+    pml("# Edge list: (resi_src, resi_tgt, radius, r1,g1,b1, r2,g2,b2)")
+    pml(f"_EDGES = {edge_tuples!r}")
+    pml(f"_CHAIN = {chain!r}")
+    pml(f"_SEL   = 'protein'")
+    pml("")
+    pml("def draw_edges():")
+    pml("    obj = []")
+    pml("    for src, tgt, rad, r1,g1,b1, r2,g2,b2 in _EDGES:")
+    pml("        s1 = f'{_SEL} and chain {_CHAIN} and resi {src} and name CA'")
+    pml("        s2 = f'{_SEL} and chain {_CHAIN} and resi {tgt} and name CA'")
+    pml("        p1 = cmd.get_atom_coords(s1)")
+    pml("        p2 = cmd.get_atom_coords(s2)")
+    pml("        if p1 and p2:")
+    pml("            obj += [CYLINDER,")
+    pml("                    p1[0],p1[1],p1[2], p2[0],p2[1],p2[2],")
+    pml("                    rad, r1,g1,b1, r2,g2,b2]")
+    pml("    if obj:")
+    pml("        cmd.load_cgo(obj, 'network_edges')")
     pml("")
     pml("draw_edges()")
     pml("python end")
@@ -566,8 +593,9 @@ def parse_args():
     p.add_argument("--pdb",        default="", help="PDB file for PyMOL visualisation")
     p.add_argument("--out",        default=".", help="Output directory (default: current dir)")
     p.add_argument("--prefix",     default="",  help="Filename prefix (default: matrix basename)")
-    p.add_argument("--threshold",  type=float, default=0.0,
-                   help="Edge weight threshold for graph (default 0.0 — all positive edges)")
+    p.add_argument("--threshold",  type=float, default=None,
+                   help="Edge weight threshold for graph (default: auto = mean + 0.5*std "
+                        "of off-diagonal values; pass 0 to include all positive edges)")
     p.add_argument("--method",     default="leading_eigenvector",
                    choices=["leading_eigenvector", "louvain"],
                    help="Community detection algorithm (default: leading_eigenvector)")
@@ -632,10 +660,17 @@ def main():
         if not HAS_IGRAPH:
             print("  [network] skipped — igraph not installed")
         else:
-            g = build_graph(mat, threshold=args.threshold,
+            threshold = args.threshold
+            if threshold is None:
+                threshold = auto_threshold(mat, asymmetric=args.asymmetric)
+                print(f"  Auto threshold: {threshold:.4f}  (mean + 0.5·std of positive off-diag values)")
+            elif threshold == 0.0:
+                print("  WARNING: threshold=0 includes all positive edges — graph may be near-complete")
+
+            g = build_graph(mat, threshold=threshold,
                             asymmetric=args.asymmetric)
             print(f"  Graph: {g.vcount()} nodes, {g.ecount()} edges "
-                  f"(threshold > {args.threshold})")
+                  f"(threshold > {threshold:.4f})")
 
             if g.ecount() == 0:
                 print("  WARNING: no edges above threshold — try lowering --threshold")

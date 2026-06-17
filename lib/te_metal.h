@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #ifdef GMX_CORRELATION_USE_METAL
 #include "correlation_core.h"

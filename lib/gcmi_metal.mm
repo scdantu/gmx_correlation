@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * gcmi_metal.mm — Metal GPU backend for the GCMI estimator.
  *

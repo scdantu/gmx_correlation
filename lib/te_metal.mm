@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * te_metal.mm — Metal GPU backend for transfer entropy (Frenzel-Pompe CMI).
  *

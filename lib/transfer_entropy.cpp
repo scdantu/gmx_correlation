@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * transfer_entropy.cpp — Frenzel-Pompe CMI-based transfer entropy estimator.
  *

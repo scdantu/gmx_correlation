@@ -1,0 +1,108 @@
+cff-version: 1.2.0
+message: "If you use gmx_correlation in your research, please cite it as below."
+
+title: "gmx_correlation: pairwise atomic correlation matrices for GROMACS 2025"
+version: "1.2.0"
+date-released: "2026-06-17"
+license: GPL-3.0-or-later
+
+authors:
+  - family-names: Dantu
+    given-names: Sarath Chandra
+    email: sarathchandradantu@gmail.com
+
+repository-code: "https://github.com/sarathdantu/gmx_correlation"
+
+abstract: >
+  gmx_correlation is a GROMACS 2025 trajectory-analysis module for computing
+  pairwise atomic mutual-information correlation matrices from MD simulations.
+  It implements three estimators: (1) Gaussian linearised MI
+  (Lange & Grubmüller 2006), (2) Kraskov-Stögbauer-Grassberger k-NN MI
+  (Kraskov et al. 2004), and (3) Gaussian Copula MI (Ince et al. 2017).
+  Optional transfer-entropy output (Frenzel & Pompe 2007) produces directed
+  networks. GPU acceleration is provided via Apple Metal (macOS) and CUDA
+  (Linux/NVIDIA). Post-processing tools include heatmap visualisation,
+  community detection, eigenvector centrality, and PyMOL network export.
+
+keywords:
+  - molecular dynamics
+  - mutual information
+  - correlation matrix
+  - GROMACS
+  - protein dynamics
+  - transfer entropy
+  - network analysis
+
+references:
+  - type: article
+    title: "Estimating mutual information"
+    authors:
+      - family-names: Kraskov
+        given-names: Alexander
+      - family-names: Stögbauer
+        given-names: Harald
+      - family-names: Grassberger
+        given-names: Peter
+    journal: "Physical Review E"
+    volume: 69
+    issue: 6
+    year: 2004
+    doi: "10.1103/PhysRevE.69.066138"
+
+  - type: article
+    title: "Generalized correlations based on the concept of mutual information"
+    authors:
+      - family-names: Lange
+        given-names: Oliver F.
+      - family-names: Grubmüller
+        given-names: Helmut
+    journal: "Proteins: Structure, Function, and Bioinformatics"
+    volume: 62
+    issue: 4
+    year: 2006
+    doi: "10.1002/prot.20784"
+
+  - type: article
+    title: "A statistical framework for neuroimaging data analysis based on mutual information estimated via a Gaussian copula"
+    authors:
+      - family-names: Ince
+        given-names: Robin A. A.
+      - family-names: Giordano
+        given-names: Bruno L.
+      - family-names: Kayser
+        given-names: Christoph
+      - family-names: Rousselet
+        given-names: Guillaume A.
+      - family-names: Gross
+        given-names: Joachim
+      - family-names: Schyns
+        given-names: Philippe G.
+    journal: "Human Brain Mapping"
+    volume: 38
+    issue: 3
+    year: 2017
+    doi: "10.1002/hbm.23471"
+
+  - type: article
+    title: "Measuring information transfer"
+    authors:
+      - family-names: Schreiber
+        given-names: Thomas
+    journal: "Physical Review Letters"
+    volume: 85
+    issue: 2
+    year: 2000
+    doi: "10.1103/PhysRevLett.85.461"
+
+  - type: article
+    title: "Partial mutual information for coupling analysis of multivariate time series"
+    authors:
+      - family-names: Frenzel
+        given-names: Stefan
+      - family-names: Pompe
+        given-names: Bernd
+    journal: "Physical Review Letters"
+    volume: 99
+    issue: 20
+    year: 2007
+    doi: "10.1103/PhysRevLett.99.204101"
